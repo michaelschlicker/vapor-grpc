@@ -241,54 +241,17 @@ private final class HTTPServerConnection {
             // Set the handlers that are applied to the accepted Channels
             .childChannelInitializer { [weak application] channel in
                 // add TLS handlers if configured
-                if var tlsConfiguration = configuration.tlsConfiguration {
-                    // prioritize http/2
-                    if configuration.supportVersions.contains(.two) {
-                        tlsConfiguration.applicationProtocols.append("h2")
+                return channel.configureHTTP2Pipeline(
+                    mode: .server,
+                    inboundStreamStateInitializer: { (channel, streamID) in
+                        return channel.pipeline.addVaporHTTP2Handlers(
+                            application: application!,
+                            responder: responder,
+                            configuration: configuration,
+                            streamID: streamID
+                        )
                     }
-                    if configuration.supportVersions.contains(.one) {
-                        tlsConfiguration.applicationProtocols.append("http/1.1")
-                    }
-                    let sslContext: NIOSSLContext
-                    let tlsHandler: NIOSSLServerHandler
-                    do {
-                        sslContext = try NIOSSLContext(configuration: tlsConfiguration)
-                        tlsHandler = try NIOSSLServerHandler(context: sslContext)
-                    } catch {
-                        configuration.logger.error("Could not configure TLS: \(error)")
-                        return channel.close(mode: .all)
-                    }
-                    return channel.pipeline.addHandler(tlsHandler).flatMap { _ in
-                        return channel.pipeline.configureHTTP2SecureUpgrade(h2PipelineConfigurator: { pipeline in
-                            return channel.configureHTTP2Pipeline(
-                                mode: .server,
-                                inboundStreamStateInitializer: { (channel, streamID) in
-                                    return channel.pipeline.addVaporHTTP2Handlers(
-                                        application: application!,
-                                        responder: responder,
-                                        configuration: configuration,
-                                        streamID: streamID
-                                    )
-                                }
-                            ).map { _ in }
-                        }, http1PipelineConfigurator: { pipeline in
-                            return pipeline.addVaporHTTP1Handlers(
-                                application: application!,
-                                responder: responder,
-                                configuration: configuration
-                            )
-                        })
-                    }
-                } else {
-                    guard !configuration.supportVersions.contains(.two) else {
-                        fatalError("Plaintext HTTP/2 (h2c) not yet supported.")
-                    }
-                    return channel.pipeline.addVaporHTTP1Handlers(
-                        application: application!,
-                        responder: responder,
-                        configuration: configuration
-                    )
-                }
+                ).map { _ in }
             }
             
             // Enable TCP_NODELAY and SO_REUSEADDR for the accepted Channels
